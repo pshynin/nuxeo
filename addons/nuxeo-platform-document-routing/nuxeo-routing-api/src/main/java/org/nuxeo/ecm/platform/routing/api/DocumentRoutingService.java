@@ -588,6 +588,8 @@ public interface DocumentRoutingService {
      * @param session
      * @return
      * @since 7.2
+     * since 11.1 this method does not scale as it does not paginate results.
+     *      Use {@link org.nuxeo.ecm.platform.routing.core.provider.RoutingTaskPageProvider#getCurrentPage()} instead.
      */
     List<Task> getTasks(final DocumentModel document, String actorId, String workflowInstanceId,
             String workflowModelName, CoreSession session);

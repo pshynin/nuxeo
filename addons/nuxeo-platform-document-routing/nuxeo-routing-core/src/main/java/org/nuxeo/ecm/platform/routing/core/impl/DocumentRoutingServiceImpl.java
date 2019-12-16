@@ -1326,6 +1326,8 @@ public class DocumentRoutingServiceImpl extends DefaultComponent implements Docu
 
     /**
      * @since 7.2
+     * since 11.1 this methods does not scale as it does not paginate results.
+     *      Use #{@link org.nuxeo.ecm.platform.routing.core.provider.RoutingTaskPageProvider#getCurrentPage()} instead.
      */
     @Override
     public List<Task> getTasks(final DocumentModel document, String actorId, String workflowInstanceId,
