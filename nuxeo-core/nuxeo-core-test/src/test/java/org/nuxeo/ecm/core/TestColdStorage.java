@@ -56,6 +56,8 @@ public class TestColdStorage {
 
     protected static final String FILE_CONTENT = "foo";
 
+    protected static final int NUMBER_OF_DAYS_OF_AVAILABILITY = 5;
+
     @Inject
     protected CoreSession session;
 
@@ -108,6 +110,67 @@ public class TestColdStorage {
         } catch (NuxeoException ne) {
             assertEquals(SC_NOT_FOUND, ne.getStatusCode());
             assertEquals(String.format("There is no main content for document: %s.", documentModel), ne.getMessage());
+        }
+    }
+
+    @Test
+    public void shouldRetrieveDocumentBlobFromColdStorage() throws IOException {
+        DocumentModel documentModel = createDocument(true);
+
+        // move the blob to cold storage
+        ColdStorageHelper.moveContentToColdStorage(session, documentModel.getRef());
+
+        // retrieve, which means initiate a request to restore the blob from cold storage
+        documentModel = ColdStorageHelper.retrieveContentFromColdStorage(session, documentModel.getRef(),
+                NUMBER_OF_DAYS_OF_AVAILABILITY);
+        transactionalFeature.nextTransaction();
+        documentModel = session.getDocument(documentModel.getRef());
+
+        assertTrue((Boolean) documentModel.getPropertyValue(ColdStorageHelper.COLD_STORAGE_BEING_RETRIEVED_PROPERTY));
+
+        // check that `file:content` still contains the thumbnail blob
+        checkBlobContent(documentModel, ColdStorageHelper.FILE_CONTENT_PROPERTY,
+                DummyThumbnailFactory.DUMMY_THUMBNAIL_CONTENT);
+
+        // check that `coldstorage:coldContent` still contains the original file content
+        checkBlobContent(documentModel, ColdStorageHelper.COLD_STORAGE_CONTENT_PROPERTY, FILE_CONTENT);
+    }
+
+    @Test
+    public void shouldFailWhenRetrievingDocumentBlobFromColdStorageBeingRetrieved() {
+        DocumentModel documentModel = createDocument(true);
+
+        // move the blob to cold storage
+        ColdStorageHelper.moveContentToColdStorage(session, documentModel.getRef());
+
+        // retrieve, which means initiate a request to restore the blob from cold storage
+        documentModel = ColdStorageHelper.retrieveContentFromColdStorage(session, documentModel.getRef(),
+                NUMBER_OF_DAYS_OF_AVAILABILITY);
+
+        // try to retrieve a second time
+        try {
+            ColdStorageHelper.retrieveContentFromColdStorage(session, documentModel.getRef(),
+                    NUMBER_OF_DAYS_OF_AVAILABILITY);
+            fail("Should fail because the cold storage content is being retrieved.");
+        } catch (NuxeoException ne) {
+            assertEquals(SC_CONFLICT, ne.getStatusCode());
+            assertEquals(String.format("The cold storage content associated with the document: %s is being retrieved.",
+                    documentModel), ne.getMessage());
+        }
+    }
+
+    @Test
+    public void shouldFailWhenRetrievingDocumentBlobWithoutColdStorageContent() {
+        DocumentModel documentModel = createDocument(true);
+        try {
+            // try to retrieve from cold storage where the blob is not stored in it
+            ColdStorageHelper.retrieveContentFromColdStorage(session, documentModel.getRef(),
+                    NUMBER_OF_DAYS_OF_AVAILABILITY);
+            fail("Should fail because there no cold storage content associated to this document.");
+        } catch (NuxeoException ne) {
+            assertEquals(SC_NOT_FOUND, ne.getStatusCode());
+            assertEquals(String.format("No cold storage content defined for document: %s.", documentModel),
+                    ne.getMessage());
         }
     }
 
