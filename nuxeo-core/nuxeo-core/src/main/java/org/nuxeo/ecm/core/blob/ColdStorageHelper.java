@@ -29,9 +29,13 @@ import org.apache.logging.log4j.Logger;
 import org.nuxeo.ecm.core.api.Blob;
 import org.nuxeo.ecm.core.api.CoreSession;
 import org.nuxeo.ecm.core.api.DocumentModel;
+import org.nuxeo.ecm.core.api.DocumentModelList;
 import org.nuxeo.ecm.core.api.DocumentRef;
 import org.nuxeo.ecm.core.api.NuxeoException;
 import org.nuxeo.ecm.core.api.thumbnail.ThumbnailService;
+import org.nuxeo.ecm.core.event.Event;
+import org.nuxeo.ecm.core.event.EventService;
+import org.nuxeo.ecm.core.event.impl.DocumentEventContext;
 import org.nuxeo.ecm.core.schema.FacetNames;
 import org.nuxeo.runtime.api.Framework;
 
@@ -49,6 +53,10 @@ public class ColdStorageHelper {
     public static final String COLD_STORAGE_CONTENT_PROPERTY = "coldstorage:coldContent";
 
     public static final String COLD_STORAGE_BEING_RETRIEVED_PROPERTY = "coldstorage:beingRetrieved";
+
+    public static final String GET_DOCUMENTS_TO_CHECK_QUERY = "SELECT * FROM Document WHERE coldstorage:beingRetrieved = 1";
+
+    public static final String COLD_STORAGE_CONTENT_AVAILABLE_EVENT_NAME = "coldStorageContentBecomeAvailable";
 
     /**
      * Moves the main content associated with the document of the given {@link DocumentRef} to a cold storage.
@@ -116,6 +124,85 @@ public class ColdStorageHelper {
 
         documentModel.setPropertyValue(COLD_STORAGE_BEING_RETRIEVED_PROPERTY, true);
         return session.saveDocument(documentModel);
+    }
+
+    /**
+     * Checks if the retrieved cold storage content are available for downloading.
+     *
+     * @implSpec: This method will query all documents with a cold storage content which are being retrieved
+     *            {@value COLD_STORAGE_BEING_RETRIEVED_PROPERTY},
+     *            {@link #retrieveContentFromColdStorage(CoreSession, DocumentRef, int)} and it checks if it is
+     *            available for downloading. In which case then it will fire an event with name
+     *            {@value COLD_STORAGE_CONTENT_AVAILABLE_EVENT_NAME}
+     */
+    // FIXME NXP-28429 will be responsible of setting "coldstorage:beingRetrieved" -> false once the email
+    // is sent to avoid inconsistency
+    public static ColdStorageContentStatus checkAvailabilityOfColdStorageContent(CoreSession session) {
+        log.debug("Start checking the available cold storage content which are being retrieved for repository: {}",
+                session::getRepositoryName);
+
+        // as the volume of result will be small, we don't use BAF
+        DocumentModelList documents = session.query(GET_DOCUMENTS_TO_CHECK_QUERY);
+
+        // for every available content we will fire an event
+        int available = 0;
+        EventService eventService = Framework.getService(EventService.class);
+        for (DocumentModel doc : documents) {
+            if (isColdStorageContentAvailable(doc)) {
+                available++;
+                DocumentEventContext ctx = new DocumentEventContext(session, session.getPrincipal(), doc);
+                Event event = ctx.newEvent(COLD_STORAGE_CONTENT_AVAILABLE_EVENT_NAME);
+                eventService.fireEvent(event);
+            }
+        }
+
+        int total = documents.size();
+        log.debug("End checking the available cold storage content for repository: {}, found: {}/{}",
+                session.getRepositoryName(), available, total);
+
+        return new ColdStorageContentStatus(session.getRepositoryName(), total, available);
+    }
+
+    /**
+     * Checks if the retrieved cold storage content associated with the given document is available for downloading.
+     * {@link #retrieveContentFromColdStorage(CoreSession, DocumentRef, int)}
+     * {@link #checkAvailabilityOfColdStorageContent(CoreSession)}
+     */
+    public static boolean isColdStorageContentAvailable(DocumentModel documentModel) {
+        // FIXME to be reworked depending on how we will check the availability on low level
+        return documentModel.getPropertyValue(COLD_STORAGE_CONTENT_PROPERTY) != null
+                && documentModel.hasFacet(FacetNames.COLD_STORAGE);
+    }
+
+    /**
+     * Gives status about the cold storage content being retrieved or are available for a given repository.
+     */
+    public static class ColdStorageContentStatus {
+
+        protected final String repositoryName;
+
+        protected final int totalBeingRetrieved;
+
+        protected final int totalContentAvailable;
+
+        public ColdStorageContentStatus(final String repositoryName, final int totalBeingRetrieved,
+                final int totalContentAvailable) {
+            this.repositoryName = repositoryName;
+            this.totalBeingRetrieved = totalBeingRetrieved;
+            this.totalContentAvailable = totalContentAvailable;
+        }
+
+        public String getRepositoryName() {
+            return repositoryName;
+        }
+
+        public int getTotalBeingRetrieved() {
+            return totalBeingRetrieved;
+        }
+
+        public int getTotalContentAvailable() {
+            return totalContentAvailable;
+        }
     }
 
     private ColdStorageHelper() {
