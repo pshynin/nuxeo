@@ -112,12 +112,19 @@ public abstract class AbstractTrashService implements TrashService {
             return false;
         }
         // used to do only check on parent perm
-        TrashInfo info = getInfo(docs, principal, false, true);
+        TrashInfo info = getInfoWithExitLoopCondition(docs, principal, false, true, true);
         return info.docs.size() == docs.size();
     }
 
     protected TrashInfo getInfo(List<DocumentModel> docs, NuxeoPrincipal principal, boolean checkProxies,
             boolean checkDeleted) {
+        
+        return getInfoWithExitLoopCondition(docs, principal, checkProxies, checkDeleted, false);
+    }
+
+    protected TrashInfo getInfoWithExitLoopCondition(List<DocumentModel> docs, NuxeoPrincipal principal,
+            boolean checkProxies, boolean checkDeleted, boolean exitOnFirstDelta) {
+
         TrashInfo info = new TrashInfo();
         info.docs = new ArrayList<>(docs.size());
         if (docs.isEmpty()) {
@@ -125,6 +132,9 @@ public abstract class AbstractTrashService implements TrashService {
         }
         CoreSession session = docs.get(0).getCoreSession();
         for (DocumentModel doc : docs) {
+            if (exitOnFirstDelta && (info.forbidden > 0 || info.locked > 0 || info.proxies > 0)) {
+                return info;
+            }
             if (checkDeleted && !doc.isTrashed()) {
                 info.forbidden++;
                 continue;
