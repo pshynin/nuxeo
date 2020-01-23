@@ -18,4 +18,24 @@
     </listener>
   </extension>
 
+  <!-- define the listener that will be responsible for sending the mails -->
+  <extension
+    target="org.nuxeo.ecm.platform.ec.notification.service.NotificationService"
+    point="notifications">
+
+    <notification name="ColdStorageContentBecomesAvailable" channel="email" enabled="true" availableIn="*"
+                  subject="Archive content available on '${docTitle}'"
+                  autoSubscribed="false" template="coldStorageContentBecomesAvailable"
+                  label="label.document.download">
+      <event name="coldStorageContentBecomesAvailable" />
+    </notification>
+
+  </extension>
+
+  <extension
+    target="org.nuxeo.ecm.platform.ec.notification.service.NotificationService"
+    point="templates">
+    <template name="coldStorageContentBecomesAvailable" src="templates/coldStorageContentAvailable.ftl" />
+  </extension>
+
 </component>

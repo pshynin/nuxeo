@@ -23,6 +23,8 @@ import static javax.servlet.http.HttpServletResponse.SC_CONFLICT;
 import static javax.servlet.http.HttpServletResponse.SC_NOT_FOUND;
 
 import java.io.Serializable;
+import java.util.HashMap;
+import java.util.Map;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -56,7 +58,11 @@ public class ColdStorageHelper {
 
     public static final String GET_DOCUMENTS_TO_CHECK_QUERY = "SELECT * FROM Document WHERE coldstorage:beingRetrieved = 1";
 
-    public static final String COLD_STORAGE_CONTENT_AVAILABLE_EVENT_NAME = "coldStorageContentBecomeAvailable";
+    public static final String COLD_STORAGE_CONTENT_AVAILABLE_EVENT_NAME = "coldStorageContentBecomesAvailable";
+
+    public static final String NUMBER_OF_DAYS_OF_AVAILABILITY_KEY = "numberOfDaysOfAvailability";
+
+    public static final String ARCHIVE_LOCATION_KEY = "archiveLocation";
 
     /**
      * Moves the main content associated with the document of the given {@link DocumentRef} to a cold storage.
@@ -151,6 +157,11 @@ public class ColdStorageHelper {
             if (isColdStorageContentAvailable(doc)) {
                 available++;
                 DocumentEventContext ctx = new DocumentEventContext(session, session.getPrincipal(), doc);
+                Map<String, Serializable> properties = new HashMap<>();
+                //FIXME: WIP
+                properties.put(NUMBER_OF_DAYS_OF_AVAILABILITY_KEY, "TO DEFINE");
+                properties.put(ARCHIVE_LOCATION_KEY, "https://www.nuxeo.com/");
+                ctx.setProperties(properties);
                 Event event = ctx.newEvent(COLD_STORAGE_CONTENT_AVAILABLE_EVENT_NAME);
                 eventService.fireEvent(event);
             }
