@@ -25,6 +25,7 @@ import static java.util.Collections.singletonMap;
 import static java.util.stream.Collectors.collectingAndThen;
 import static java.util.stream.Collectors.toList;
 import static org.nuxeo.ecm.platform.comment.api.ExternalEntityConstants.EXTERNAL_ENTITY_FACET;
+import static org.nuxeo.ecm.core.query.sql.NXQL.ECM_UUID;
 import static org.nuxeo.ecm.platform.comment.workflow.utils.CommentsConstants.COMMENT_ANCESTOR_IDS;
 import static org.nuxeo.ecm.platform.comment.workflow.utils.CommentsConstants.COMMENT_AUTHOR;
 import static org.nuxeo.ecm.platform.comment.workflow.utils.CommentsConstants.COMMENT_CREATION_DATE;
@@ -79,6 +80,22 @@ public class PropertyCommentManager extends AbstractCommentManager {
     protected static final String HIDDEN_FOLDER_TYPE = "HiddenFolder";
 
     protected static final String COMMENT_NAME = "comment";
+
+    /**
+     * Counts how many comments where made on a specific document.
+     *
+     * @since 11.1
+     */
+    protected static final String QUERY_GET_COMMENTS_UUID_BY_COMMENT_ANCESTOR = //
+            "SELECT " + ECM_UUID + " FROM Comment WHERE " + COMMENT_ANCESTOR_IDS + "/* = '%s'";
+
+    /**
+     * Counts how many comments where made by a specific user on a specific document.
+     *
+     * @since 11.1
+     */
+    protected static final String QUERY_GET_COMMENTS_UUID_BY_COMMENT_ANCESTOR_AND_AUTHOR = //
+            QUERY_GET_COMMENTS_UUID_BY_COMMENT_ANCESTOR + " AND " + COMMENT_AUTHOR + " = '%s'";
 
     @Override
     @SuppressWarnings("unchecked")
@@ -138,6 +155,7 @@ public class PropertyCommentManager extends AbstractCommentManager {
                     (Serializable) computeAncestorIds(session, docModel.getId()));
             DocumentModel comment = session.createDocument(commentModelToCreate);
             comment.detach(true);
+            handleNotificationAutoSubscriptions(session, commentModel, session.getDocument(docRef));
             notifyEvent(session, CommentEvents.COMMENT_ADDED, docModel, comment);
 
             return comment;
@@ -172,6 +190,7 @@ public class PropertyCommentManager extends AbstractCommentManager {
             commentModel.copyContent(comment);
             commentModel.setPropertyValue(COMMENT_ANCESTOR_IDS, (Serializable) computeAncestorIds(s, docModel.getId()));
             commentModel = s.createDocument(commentModel);
+            handleNotificationAutoSubscriptions(session, commentModel, session.getDocument(docRef));
             notifyEvent(session, CommentEvents.COMMENT_ADDED, docModel, commentModel);
             return commentModel;
         });
@@ -211,6 +230,7 @@ public class PropertyCommentManager extends AbstractCommentManager {
             // Compute the list of ancestor ids
             commentModel.setPropertyValue(COMMENT_ANCESTOR_IDS, (Serializable) computeAncestorIds(s, parentId));
             commentModel = s.createDocument(commentModel);
+            handleNotificationAutoSubscriptions(s, commentModel, s.getDocument(ancestorRef));
             notifyEvent(s, CommentEvents.COMMENT_ADDED, commentModel);
             return Comments.newComment(commentModel);
         });
@@ -467,5 +487,19 @@ public class PropertyCommentManager extends AbstractCommentManager {
             return new IdRef(commentedDocId);
         });
 
+    }
+
+    @Override
+    protected boolean hasComments(CoreSession session, DocumentModel document) {
+        String query = String.format( //
+                QUERY_GET_COMMENTS_UUID_BY_COMMENT_ANCESTOR, document.getId());
+        return !session.queryProjection(query, 1, 0).isEmpty();
+    }
+
+    @Override
+    protected boolean hasComments(CoreSession session, DocumentModel document, String user) {
+        String query = String.format( //
+                QUERY_GET_COMMENTS_UUID_BY_COMMENT_ANCESTOR_AND_AUTHOR, document.getId(), user);
+        return !session.queryProjection(query, 1, 0).isEmpty();
     }
 }

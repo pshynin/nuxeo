@@ -25,11 +25,13 @@ import static org.nuxeo.ecm.core.api.event.DocumentEventTypes.DOCUMENT_CREATED;
 import static org.nuxeo.ecm.core.api.event.DocumentEventTypes.DOCUMENT_REMOVED;
 import static org.nuxeo.ecm.core.api.event.DocumentEventTypes.DOCUMENT_UPDATED;
 import static org.nuxeo.ecm.platform.comment.CommentUtils.checkDocumentEventContext;
+import static org.nuxeo.ecm.platform.comment.CommentUtils.createUser;
 import static org.nuxeo.ecm.platform.comment.api.CommentEvents.COMMENT_ADDED;
 import static org.nuxeo.ecm.platform.comment.api.CommentEvents.COMMENT_REMOVED;
 import static org.nuxeo.ecm.platform.comment.api.CommentEvents.COMMENT_UPDATED;
 import static org.nuxeo.ecm.platform.comment.workflow.utils.CommentsConstants.COMMENT_PARENT_ID;
 
+import java.util.Arrays;
 import java.util.List;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
@@ -49,8 +51,9 @@ import org.nuxeo.ecm.platform.comment.api.Comment;
 import org.nuxeo.ecm.platform.comment.api.CommentImpl;
 import org.nuxeo.ecm.platform.comment.api.CommentManager;
 import org.nuxeo.ecm.platform.ec.notification.NotificationConstants;
-import org.nuxeo.ecm.platform.ec.notification.service.NotificationService;
+import org.nuxeo.ecm.platform.notification.api.NotificationManager;
 import org.nuxeo.runtime.api.Framework;
+import org.nuxeo.runtime.test.runner.Deploy;
 import org.nuxeo.runtime.test.runner.Features;
 import org.nuxeo.runtime.test.runner.FeaturesRunner;
 import org.nuxeo.runtime.test.runner.TransactionalFeature;
@@ -62,8 +65,16 @@ import org.nuxeo.runtime.test.runner.TransactionalFeature;
 @Features(NotificationCommentFeature.class)
 public abstract class AbstractTestCommentNotification {
 
+    protected static final String COMMENT_ADDED_NOTIFICATION = "CommentAdded";
+
+    protected static final String COMMENT_UPDATED_NOTIFICATION = "CommentUpdated";
+
+    protected static final String ADMINISTRATOR = "Administrator";
+
+    protected static final String ANY_COMMENT_MESSAGE = "any Comment message";
+
     @Inject
-    protected NotificationService notificationService;
+    protected NotificationManager notificationManager;
 
     @Inject
     protected CoreSession session;
@@ -100,7 +111,7 @@ public abstract class AbstractTestCommentNotification {
         // We subscribe to the creation document to check that we will not be notified about the comment creation as
         // document (see CommentCreationVeto), only the comment added, and the 'File' document creation
         captureAndVerifyCommentEventNotification(() -> {
-            Comment createdComment = createCommentAndAddSubscription("CommentAdded", "Creation");
+            Comment createdComment = createCommentAndAddSubscription(COMMENT_ADDED_NOTIFICATION, "Creation");
             return session.getDocument(new IdRef(createdComment.getId()));
         }, COMMENT_ADDED, DOCUMENT_CREATED);
     }
@@ -109,7 +120,7 @@ public abstract class AbstractTestCommentNotification {
     public void shouldNotifyEventWhenUpdateComment() {
         // We subscribe to the update document to check that we will not be notified about the comment updated as
         // document (see CommentModificationVeto), only the comment updated.
-        Comment createdComment = createCommentAndAddSubscription("CommentUpdated", "Modification");
+        Comment createdComment = createCommentAndAddSubscription(COMMENT_UPDATED_NOTIFICATION, "Modification");
 
         captureAndVerifyCommentEventNotification(() -> {
             createdComment.setText("I update the message");
@@ -133,26 +144,56 @@ public abstract class AbstractTestCommentNotification {
     @Test
     public void shouldNotifyWithTheRightCommentedDocument() {
         // First comment
-        Comment createdComment = createComment(commentedDocumentModel);
+        Comment createdComment = createComment(commentedDocumentModel, ADMINISTRATOR, ANY_COMMENT_MESSAGE);
         DocumentModel createdCommentDocModel = session.getDocument(new IdRef(createdComment.getId()));
         // before subscribing, or previous event will be notified as well
         transactionalFeature.nextTransaction();
         // Reply
         captureAndVerifyCommentEventNotification(() -> {
-            addSubscriptions("CommentAdded");
+            addSubscriptions(COMMENT_ADDED_NOTIFICATION);
 
-            Comment reply = createComment(createdCommentDocModel);
+            Comment reply = createComment(commentedDocumentModel, ADMINISTRATOR, ANY_COMMENT_MESSAGE);
             DocumentModel replyDocumentModel = session.getDocument(new IdRef(reply.getId()));
             return session.getDocument(new IdRef(replyDocumentModel.getId()));
         }, COMMENT_ADDED, DOCUMENT_CREATED);
     }
 
-    private void addSubscriptions(String... notifications) {
+    protected void addSubscriptions(String... notifications) {
         NuxeoPrincipal principal = session.getPrincipal();
         String subscriber = NotificationConstants.USER_PREFIX + principal.getName();
         for (String notif : notifications) {
-            notificationService.addSubscription(subscriber, notif, commentedDocumentModel, false, principal, notif);
+            notificationManager.addSubscription(subscriber, notif, commentedDocumentModel, false, principal, notif);
         }
+    }
+
+    @Test
+    @Deploy("org.nuxeo.ecm.platform.comment:OSGI-INF/notification-subscription-contrib.xml")
+    public void testAutoSubscribingOnlyOnceToNewComments() {
+        String john = "john";
+        String johnSubscription = NotificationConstants.USER_PREFIX + john;
+        createUser(john);
+        List<String> subscriptions = notificationManager.getSubscriptionsForUserOnDocument(johnSubscription,
+                commentedDocumentModel);
+        assertEquals(0, subscriptions.size());
+        createComment(commentedDocumentModel, john, "Test message");
+        transactionalFeature.nextTransaction();
+        commentedDocumentModel = session.getDocument(commentedDocumentModel.getRef());
+        subscriptions = notificationManager.getSubscriptionsForUserOnDocument(johnSubscription, commentedDocumentModel);
+        List<String> expectedSubscriptions = Arrays.asList(COMMENT_ADDED_NOTIFICATION, COMMENT_UPDATED_NOTIFICATION);
+        assertEquals(expectedSubscriptions.size(), subscriptions.size());
+        assertTrue(subscriptions.containsAll(expectedSubscriptions));
+        for (String subscription : subscriptions) {
+            notificationManager.removeSubscription(johnSubscription, subscription, commentedDocumentModel);
+        }
+        createComment(commentedDocumentModel, john, "Test message again");
+        transactionalFeature.nextTransaction();
+        subscriptions = notificationManager.getSubscriptionsForUserOnDocument(johnSubscription, commentedDocumentModel);
+        assertTrue(subscriptions.isEmpty());
+    }
+
+    @Test
+    public void testCommentManagerType() {
+        assertEquals(getType(), commentManager.getClass());
     }
 
     protected void captureAndVerifyCommentEventNotification(Supplier<DocumentModel> supplier, String commentEventType,
@@ -177,23 +218,23 @@ public abstract class AbstractTestCommentNotification {
         }
     }
 
-    @Test
-    public void testCommentManagerType() {
-        assertEquals(getType(), commentManager.getClass());
-    }
-
-    protected Comment createCommentAndAddSubscription(String... notifications) {
-        addSubscriptions(notifications);
-        return createComment(commentedDocumentModel);
-    }
-
-    protected Comment createComment(DocumentModel commentedDocModel) {
+    protected Comment createComment(DocumentModel commentedDocModel, String author, String text) {
         Comment comment = new CommentImpl();
-        comment.setAuthor("Administrator");
-        comment.setText("any Comment message");
+        comment.setAuthor(author);
+        comment.setText(text);
         comment.setParentId(commentedDocModel.getId());
 
         return commentManager.createComment(session, comment);
+    }
+
+    protected Comment createCommentAndAddSubscription(String... notifications) {
+        NuxeoPrincipal principal = session.getPrincipal();
+        String subscriber = NotificationConstants.USER_PREFIX + principal.getName();
+        for (String notif : notifications) {
+            notificationManager.addSubscription(subscriber, notif, commentedDocumentModel, false, principal, notif);
+        }
+
+        return createComment(commentedDocumentModel, ADMINISTRATOR, ANY_COMMENT_MESSAGE);
     }
 
     protected abstract Class<? extends CommentManager> getType();

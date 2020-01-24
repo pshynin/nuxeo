@@ -25,6 +25,8 @@ import static java.util.Collections.singletonMap;
 import static java.util.stream.Collectors.collectingAndThen;
 import static java.util.stream.Collectors.toList;
 import static org.nuxeo.ecm.core.api.security.SecurityConstants.EVERYTHING;
+import static org.nuxeo.ecm.core.query.sql.NXQL.ECM_ANCESTORID;
+import static org.nuxeo.ecm.core.query.sql.NXQL.ECM_UUID;
 import static org.nuxeo.ecm.platform.comment.api.CommentManager.Feature.COMMENTS_LINKED_WITH_PROPERTY;
 import static org.nuxeo.ecm.platform.comment.api.ExternalEntityConstants.EXTERNAL_ENTITY_FACET;
 import static org.nuxeo.ecm.platform.comment.impl.PropertyCommentManager.COMMENT_NAME;
@@ -77,6 +79,21 @@ public class TreeCommentManager extends AbstractCommentManager {
     protected static final String GET_COMMENTS_FOR_DOCUMENT_PAGE_PROVIDER_NAME = "GET_COMMENTS_FOR_DOCUMENT_BY_ECM_PARENT";
 
     public static final String SERVICE_WITHOUT_IMPLEMENTATION_MESSAGE = "This service implementation does not implement deprecated API.";
+
+    /**
+     * Counts how many comments where made on a specific document.
+     */
+    protected static final String QUERY_GET_COMMENTS_UUID_BY_COMMENT_ANCESTOR = //
+            "SELECT " + ECM_UUID + " FROM Comment WHERE " + ECM_ANCESTORID + " = '%s'";
+
+    /**
+     * Counts how many comments where made by a specific user on a specific document.
+     */
+    protected static final String QUERY_GET_COMMENTS_UUID_BY_COMMENT_ANCESTOR_AND_AUTHOR = //
+            QUERY_GET_COMMENTS_UUID_BY_COMMENT_ANCESTOR + " AND " + COMMENT_AUTHOR + " = '%s'";
+
+    /** @since 11.1 **/
+    public static final String COMMENT_RELATED_TEXT_ID = "commentRelatedTextId_%s";
 
     @Override
     public List<DocumentModel> getComments(CoreSession s, DocumentModel docModel) {
@@ -163,6 +180,7 @@ public class TreeCommentManager extends AbstractCommentManager {
             }
 
             commentDocModel = session.createDocument(commentDocModel);
+            handleNotificationAutoSubscriptions(session, commentDocModel);
             notifyEvent(session, CommentEvents.COMMENT_ADDED, documentModel, commentDocModel);
             return Comments.newComment(commentDocModel);
         });
@@ -187,9 +205,24 @@ public class TreeCommentManager extends AbstractCommentManager {
 
             commentModelToCreate = session.createDocument(commentModelToCreate);
             commentModelToCreate.detach(true);
+            handleNotificationAutoSubscriptions(session, commentModelToCreate);
             notifyEvent(session, CommentEvents.COMMENT_ADDED, documentModel, commentModelToCreate);
             return commentModelToCreate;
         });
+    }
+
+    /**
+     * Resolves top level document and calls
+     * {@link #handleNotificationAutoSubscriptions(CoreSession, DocumentModel, DocumentModel)}.
+     *
+     * @param session the core session
+     * @param commentModelToCreate the comment being added
+     * @since 11.1
+     */
+    protected void handleNotificationAutoSubscriptions(CoreSession session, DocumentModel commentModelToCreate) {
+        DocumentRef topLevelDocRef = getTopLevelCommentAncestor(session, new IdRef(commentModelToCreate.getId()));
+        DocumentModel topLevelDocument = session.getDocument(topLevelDocRef);
+        handleNotificationAutoSubscriptions(session, commentModelToCreate, topLevelDocument);
     }
 
     @Override
@@ -316,7 +349,7 @@ public class TreeCommentManager extends AbstractCommentManager {
     /**
      * Gets or creates the 'Comments' folder, this folder will be under the document being commented and it contains the
      * whole comments of the first document that we comment.
-     * 
+     *
      * @param session the core session
      * @param documentModel the document model to comment, it's can be the first document of the hierarchy or any
      *            comment that being replied
@@ -486,4 +519,19 @@ public class TreeCommentManager extends AbstractCommentManager {
 
         return commentedDocModel.getRef();
     }
+
+    @Override
+    protected boolean hasComments(CoreSession session, DocumentModel document) {
+        String query = String.format( //
+                QUERY_GET_COMMENTS_UUID_BY_COMMENT_ANCESTOR, document.getId());
+        return !session.queryProjection(query, 1, 0).isEmpty();
+    }
+
+    @Override
+    protected boolean hasComments(CoreSession session, DocumentModel document, String user) {
+        String query = String.format( //
+                QUERY_GET_COMMENTS_UUID_BY_COMMENT_ANCESTOR_AND_AUTHOR, document.getId(), user);
+        return !session.queryProjection(query, 1, 0).isEmpty();
+    }
+
 }

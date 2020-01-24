@@ -35,5 +35,6 @@ import org.nuxeo.runtime.test.runner.RunnerFeature;
 @Deploy("org.nuxeo.ecm.platform.comment.api")
 @Deploy("org.nuxeo.ecm.platform.query.api")
 @Deploy("org.nuxeo.ecm.platform.comment")
+@Deploy("org.nuxeo.ecm.platform.comment.tests:OSGI-INF/notification-contrib.xml")
 public class CommentFeature implements RunnerFeature {
 }

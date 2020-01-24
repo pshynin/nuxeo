@@ -25,12 +25,14 @@ import static org.nuxeo.ecm.core.api.event.DocumentEventTypes.DOCUMENT_CREATED;
 import static org.nuxeo.ecm.core.api.event.DocumentEventTypes.DOCUMENT_REMOVED;
 import static org.nuxeo.ecm.core.api.event.DocumentEventTypes.DOCUMENT_UPDATED;
 import static org.nuxeo.ecm.platform.comment.CommentUtils.checkDocumentEventContext;
+import static org.nuxeo.ecm.platform.comment.CommentUtils.createUser;
 import static org.nuxeo.ecm.platform.comment.api.CommentEvents.COMMENT_ADDED;
 import static org.nuxeo.ecm.platform.comment.api.CommentEvents.COMMENT_REMOVED;
 import static org.nuxeo.ecm.platform.comment.api.CommentEvents.COMMENT_UPDATED;
 import static org.nuxeo.ecm.platform.comment.workflow.utils.CommentsConstants.COMMENT_PARENT_ID;
 
 import java.time.Instant;
+import java.util.Arrays;
 import java.util.List;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
@@ -53,7 +55,8 @@ import org.nuxeo.ecm.platform.comment.api.Comment;
 import org.nuxeo.ecm.platform.comment.api.CommentManager;
 import org.nuxeo.ecm.platform.comment.api.ExternalEntity;
 import org.nuxeo.ecm.platform.ec.notification.NotificationConstants;
-import org.nuxeo.ecm.platform.ec.notification.service.NotificationService;
+import org.nuxeo.ecm.platform.notification.api.NotificationManager;
+import org.nuxeo.runtime.test.runner.Deploy;
 import org.nuxeo.runtime.test.runner.Features;
 import org.nuxeo.runtime.test.runner.FeaturesRunner;
 import org.nuxeo.runtime.test.runner.TransactionalFeature;
@@ -65,6 +68,14 @@ import org.nuxeo.runtime.test.runner.TransactionalFeature;
 @Features(NotificationCommentFeature.class)
 public abstract class AbstractTestAnnotationNotification {
 
+    protected static final String COMMENT_ADDED_NOTIFICATION = "CommentAdded";
+
+    protected static final String COMMENT_UPDATED_NOTIFICATION = "CommentUpdated";
+
+    protected static final String ADMINISTRATOR = "Administrator";
+
+    protected static final String ANY_ANNOTATION_MESSAGE = "any Annotation message";
+
     @Inject
     protected AnnotationService annotationService;
 
@@ -75,7 +86,7 @@ public abstract class AbstractTestAnnotationNotification {
     protected CoreSession session;
 
     @Inject
-    protected NotificationService notificationService;
+    protected NotificationManager notificationManager;
 
     @Inject
     protected TransactionalFeature transactionalFeature;
@@ -98,7 +109,7 @@ public abstract class AbstractTestAnnotationNotification {
         // We subscribe to the creation document to check that we will not be notified about the annotation creation as
         // document (see CommentCreationVeto), only the annotation added, and the 'File' document creation
         captureAndVerifyAnnotationEventNotification(() -> {
-            Annotation createdAnnotation = createAnnotationAndAddSubscription("CommentAdded", "Creation");
+            Annotation createdAnnotation = createAnnotationAndAddSubscription(COMMENT_ADDED_NOTIFICATION, "Creation");
             return session.getDocument(new IdRef(createdAnnotation.getId()));
         }, COMMENT_ADDED, DOCUMENT_CREATED);
     }
@@ -161,38 +172,63 @@ public abstract class AbstractTestAnnotationNotification {
     @Test
     public void shouldNotifyWithTheRightAnnotatedDocument() {
         // First comment
-        Annotation createdAnnotation = createAnnotation(annotatedDocumentModel);
+        Annotation createdAnnotation = createAnnotation(annotatedDocumentModel, ADMINISTRATOR, ANY_ANNOTATION_MESSAGE);
         DocumentModel createdAnnotationDocModel = session.getDocument(new IdRef(createdAnnotation.getId()));
         // before subscribing, or previous event will be notified as well
         transactionalFeature.nextTransaction();
         // Reply
         captureAndVerifyAnnotationEventNotification(() -> {
             // subscribe to notifications
-            addSubscriptions("CommentAdded");
+            addSubscriptions(COMMENT_ADDED_NOTIFICATION);
 
-            Comment reply = createAnnotation(createdAnnotationDocModel);
+            Comment reply = createAnnotation(createdAnnotationDocModel, ADMINISTRATOR, ANY_ANNOTATION_MESSAGE);
             DocumentModel replyDocumentModel = session.getDocument(new IdRef(reply.getId()));
             return session.getDocument(new IdRef(replyDocumentModel.getId()));
         }, COMMENT_ADDED, DOCUMENT_CREATED);
     }
 
+    @Test
+    @Deploy("org.nuxeo.ecm.platform.comment:OSGI-INF/notification-subscription-contrib.xml")
+    public void testAutoSubscribingOnlyOnceToNewAnnotations() {
+        String john = "john";
+        String johnSubscription = NotificationConstants.USER_PREFIX + john;
+        createUser(john);
+        List<String> subscriptions = notificationManager.getSubscriptionsForUserOnDocument(johnSubscription,
+                annotatedDocumentModel);
+        assertEquals(0, subscriptions.size());
+        createAnnotation(annotatedDocumentModel, john, "Test message");
+        transactionalFeature.nextTransaction();
+        annotatedDocumentModel = session.getDocument(annotatedDocumentModel.getRef());
+        subscriptions = notificationManager.getSubscriptionsForUserOnDocument(johnSubscription, annotatedDocumentModel);
+        List<String> expectedSubscriptions = Arrays.asList(COMMENT_ADDED_NOTIFICATION, COMMENT_UPDATED_NOTIFICATION);
+        assertEquals(expectedSubscriptions.size(), subscriptions.size());
+        assertTrue(subscriptions.containsAll(expectedSubscriptions));
+        for (String subscription : subscriptions) {
+            notificationManager.removeSubscription(johnSubscription, subscription, annotatedDocumentModel);
+        }
+        createAnnotation(annotatedDocumentModel, john, "Test message again");
+        transactionalFeature.nextTransaction();
+            subscriptions = notificationManager.getSubscriptionsForUserOnDocument(johnSubscription, annotatedDocumentModel);
+        assertTrue(subscriptions.isEmpty());
+    }
+
     protected Annotation createAnnotationAndAddSubscription(String... notifications) {
         addSubscriptions(notifications);
-        return createAnnotation(annotatedDocumentModel);
+        return createAnnotation(annotatedDocumentModel, ADMINISTRATOR, ANY_ANNOTATION_MESSAGE);
     }
 
     protected void addSubscriptions(String... notifications) {
         NuxeoPrincipal principal = session.getPrincipal();
         String subscriber = NotificationConstants.USER_PREFIX + principal.getName();
         for (String notif : notifications) {
-            notificationService.addSubscription(subscriber, notif, annotatedDocumentModel, false, principal, notif);
+            notificationManager.addSubscription(subscriber, notif, annotatedDocumentModel, false, principal, notif);
         }
     }
 
-    protected Annotation createAnnotation(DocumentModel annotatedDocModel) {
+    protected Annotation createAnnotation(DocumentModel annotatedDocModel, String author, String text) {
         Annotation annotation = new AnnotationImpl();
-        annotation.setAuthor(session.getPrincipal().getName());
-        annotation.setText("Any annotation message");
+        annotation.setAuthor(author);
+        annotation.setText(text);
         annotation.setParentId(annotatedDocModel.getId());
         annotation.setXpath("files:files/0/file");
         annotation.setCreationDate(Instant.now());
