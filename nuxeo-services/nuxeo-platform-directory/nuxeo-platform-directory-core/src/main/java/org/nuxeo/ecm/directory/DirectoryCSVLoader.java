@@ -38,6 +38,8 @@ import org.apache.commons.csv.CSVRecord;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
+import org.nuxeo.ecm.core.api.Blob;
+import org.nuxeo.ecm.core.api.Blobs;
 import org.nuxeo.ecm.core.schema.types.Field;
 import org.nuxeo.ecm.core.schema.types.Schema;
 import org.nuxeo.ecm.core.schema.types.Type;
@@ -65,19 +67,45 @@ public class DirectoryCSVLoader {
 
     /**
      * Loads the CSV data file based on the provided schema, and creates the corresponding entries using the provided
-     * loader.
+     * Loader.
      *
      * @param dataFileName the file name containing CSV data
      * @param delimiter the CSV column separator
      * @param schema the data schema
      * @param loader the actual consumer of loaded rows
      * @since 8.4
+     * @see #loadData(Blob, char, Schema, Consumer)
      */
     public static void loadData(String dataFileName, char delimiter, Schema schema,
             Consumer<Map<String, Object>> loader) {
-        try (InputStream in = getResource(dataFileName); //
+        Blob blob = createBlob(dataFileName);
+        loadData(blob, delimiter, schema, loader);
+    }
+
+    protected static Blob createBlob(String dataFileName) {
+        try (InputStream in = getResource(dataFileName)) {
+            return Blobs.createBlob(in, "text/csv");
+        } catch (IOException e) {
+            throw new DirectoryException("Read error while creating blob from data file: " + dataFileName, e);
+        }
+    }
+
+    /**
+     * Loads the CSV data file based on the provided schema, and creates the corresponding entries using the provided
+     * loader.
+     *
+     * @param csvDataFile the Blob file containing CSV data
+     * @param delimiter the CSV column separator
+     * @param schema the data schema
+     * @param loader the actual consumer of loaded rows
+     * @since 11.1
+     */
+    public static void loadData(Blob csvDataFile, char delimiter, Schema schema, Consumer<Map<String, Object>> loader) {
+        String dataFileName = csvDataFile.getFilename();
+        try (InputStream in = csvDataFile.getStream();
                 CSVParser csvParser = new CSVParser(new InputStreamReader(in, UTF_8),
                         CSVFormat.DEFAULT.withDelimiter(delimiter).withHeader())) {
+
             Map<String, Integer> header = csvParser.getHeaderMap();
 
             List<Field> fields = new ArrayList<>();

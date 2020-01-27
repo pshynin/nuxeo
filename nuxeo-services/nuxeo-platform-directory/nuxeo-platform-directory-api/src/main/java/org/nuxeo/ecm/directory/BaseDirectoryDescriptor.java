@@ -19,6 +19,8 @@
  */
 package org.nuxeo.ecm.directory;
 
+import static javax.servlet.http.HttpServletResponse.SC_BAD_REQUEST;
+
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -90,6 +92,38 @@ public class BaseDirectoryDescriptor implements Cloneable {
 
     public static final List<String> CREATE_TABLE_POLICIES = Arrays.asList(CREATE_TABLE_POLICY_NEVER,
             CREATE_TABLE_POLICY_ALWAYS, CREATE_TABLE_POLICY_ON_MISSING_COLUMNS);
+
+    /**
+     * Doesn't load the CSV data (except on table has just been created
+     * @since 11.1
+     */
+    public static final String NEVER_LOAD = "never_load";
+
+    /**
+     * Duplicate lines in data load from CSV are ignored.
+     * @since 11.1
+     */
+    public static final String IGNORE_DUPLICATE = "ignore_duplicate";
+
+    /**
+     * If the data loaded from CSV already exist launch en exception.
+     * @since 11.1
+     */
+    public static final String ERROR_ON_DUPLICATE = "error_on_duplicate";
+
+    /**
+     * load CSV data and update duplicate lines.
+     * @since 11.1
+     */
+    public static final String UPDATE_DUPLICATE = "update_duplicate";
+
+    /**
+     * Policy used to deal with duplicates when loading data to a directory.
+     *
+     * @since 11.1
+     */
+    public static final List<String> DATA_LOADING_POLICIES = List.of(NEVER_LOAD, IGNORE_DUPLICATE, ERROR_ON_DUPLICATE,
+            UPDATE_DUPLICATE);
 
     @XNode("@name")
     public String name;
@@ -200,7 +234,7 @@ public class BaseDirectoryDescriptor implements Cloneable {
         } else {
             sep = dataFileCharacterSeparator.charAt(0);
             if (dataFileCharacterSeparator.length() > 1) {
-                log.warn("More than one character found for character separator, will use the first one \"{}\"",sep);
+                log.warn("More than one character found for character separator, will use the first one \"{}\"", sep);
             }
         }
         return sep;
@@ -219,6 +253,39 @@ public class BaseDirectoryDescriptor implements Cloneable {
                     + CREATE_TABLE_POLICIES);
         }
         return ctp;
+    }
+
+    /**
+     * @since 11.1
+     */
+    @XNode("dataLoadingPolicy")
+    public String dataLoadingPolicy;
+
+    /**
+     * Returns the dataLoadingPolicy; default is {@link #NEVER_LOAD}.
+     *
+     * @since 11.1
+     */
+    public String getDataLoadingPolicy() {
+        if (StringUtils.isBlank(dataLoadingPolicy)) {
+            return NEVER_LOAD;
+        }
+        String dlp = dataLoadingPolicy.toLowerCase(Locale.ENGLISH);
+        checkDataLoadingPolicy(dlp);
+        return dlp;
+    }
+
+    /**
+     * Trigger a {@link DirectoryException} if the dataLoadingPolicy is not in {@link #DATA_LOADING_POLICIES}.
+     *
+     * @param dataLoadingPolicy the dataLoadingPolicy to check
+     * @throws DirectoryException if bad dataLoadingPolicy
+     */
+    public static void checkDataLoadingPolicy(String dataLoadingPolicy) {
+        if (dataLoadingPolicy == null || !DATA_LOADING_POLICIES.contains(dataLoadingPolicy)) {
+            throw new DirectoryException("Invalid dataLoadingPolicy: " + dataLoadingPolicy + ", it should be one of: "
+                    + DATA_LOADING_POLICIES, SC_BAD_REQUEST);
+        }
     }
 
     public boolean isReadOnly() {
@@ -347,6 +414,9 @@ public class BaseDirectoryDescriptor implements Cloneable {
         }
         if (other.createTablePolicy != null) {
             createTablePolicy = other.createTablePolicy;
+        }
+        if (other.dataLoadingPolicy != null) {
+            dataLoadingPolicy = other.dataLoadingPolicy;
         }
         if (other.references != null && other.references.length != 0) {
             references = other.references;
