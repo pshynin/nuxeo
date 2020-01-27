@@ -37,7 +37,7 @@ import org.nuxeo.ecm.core.api.DocumentModel;
 import org.nuxeo.ecm.core.io.marshallers.json.AbstractJsonWriterTest;
 import org.nuxeo.ecm.core.io.marshallers.json.JsonAssert;
 import org.nuxeo.ecm.core.io.registry.context.RenderingContext;
-import org.nuxeo.ecm.core.test.CoreFeature;
+import org.nuxeo.ecm.platform.comment.CommentFeature;
 import org.nuxeo.ecm.platform.comment.api.Comment;
 import org.nuxeo.ecm.platform.comment.api.CommentImpl;
 import org.nuxeo.ecm.platform.comment.api.CommentManager;
@@ -49,8 +49,7 @@ import org.nuxeo.runtime.test.runner.FeaturesRunner;
  * @since 10.3
  */
 @RunWith(FeaturesRunner.class)
-@Features(CoreFeature.class)
-@Deploy("org.nuxeo.ecm.platform.comment")
+@Features(CommentFeature.class)
 @Deploy("org.nuxeo.ecm.platform.query.api")
 public class CommentJsonWriterTest extends AbstractJsonWriterTest.External<CommentJsonWriter, Comment> {
 

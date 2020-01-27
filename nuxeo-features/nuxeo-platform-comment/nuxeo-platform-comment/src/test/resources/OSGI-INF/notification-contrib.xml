@@ -8,4 +8,8 @@
       <mailSessionJndiName>java:comp/env/Mail</mailSessionJndiName>
     </settings>
   </extension>
+  <extension target="org.nuxeo.runtime.ConfigurationService"
+             point="configuration">
+    <property name="org.nuxeo.ecm.platform.comment.service.notification.autosubscribe">false</property>
+  </extension>
 </component>
